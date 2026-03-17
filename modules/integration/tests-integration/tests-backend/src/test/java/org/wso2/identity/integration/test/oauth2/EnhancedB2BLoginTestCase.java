@@ -116,7 +116,9 @@ public class EnhancedB2BLoginTestCase extends OAuth2ServiceAbstractIntegrationTe
     @DataProvider(name = "configProvider")
     public static Object[][] configProvider() {
 
-        return new Object[][]{{TestUserMode.TENANT_ADMIN, "enhancedb2borg", "enhancedb2borg"}};
+        return new Object[][]{
+                {TestUserMode.SUPER_TENANT_ADMIN, "enhancedstborg", "enhancedstborg"},
+                {TestUserMode.TENANT_ADMIN, "enhancedb2borg2", "enhancedb2borg2"}};
     }
 
     @Factory(dataProvider = "configProvider")
@@ -316,7 +318,8 @@ public class EnhancedB2BLoginTestCase extends OAuth2ServiceAbstractIntegrationTe
     @Test(priority = 9, dependsOnMethods = "testGetAccessToken")
     public void testIntrospectAccessToken() throws Exception {
 
-        String introspectUrl = getTenantQualifiedURL(OAuth2Constant.INTRO_SPEC_ENDPOINT, tenantInfo.getDomain());
+        String introspectUrl = OAuth2Constant.INTRO_SPEC_ENDPOINT.replaceFirst(
+                "(https?://[^/]+)(/.+)", "$1/t/" + tenantInfo.getDomain() + "$2");
         JSONObject introspectionResponse = introspectTokenWithTenant(client, accessToken,
                 introspectUrl, tenantInfo.getTenantAdmin().getUserName(),
                 tenantInfo.getTenantAdmin().getPassword());
@@ -463,8 +466,11 @@ public class EnhancedB2BLoginTestCase extends OAuth2ServiceAbstractIntegrationTe
      */
     private String getOPathURL(String endpointUrl) {
 
-        String tenantUrl = getTenantQualifiedURL(endpointUrl, tenantInfo.getDomain());
-        // Insert /o/<orgId> after /t/<tenant> and before the servlet path.
+        // getTenantQualifiedURL skips the /t/ prefix for carbon.super, so force it explicitly.
+        // Result: https://localhost:9853/t/<tenant>/o/<orgId>/<servlet-path>
+        String tenantUrl = endpointUrl.replaceFirst(
+                "(https?://[^/]+)(/.+)",
+                "$1/t/" + tenantInfo.getDomain() + "$2");
         return tenantUrl.replaceFirst("(/t/[^/]+)(/.+)", "$1/o/" + organizationId + "$2");
     }
 
