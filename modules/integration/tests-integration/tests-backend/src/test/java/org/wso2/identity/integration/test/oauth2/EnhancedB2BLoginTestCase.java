@@ -48,6 +48,7 @@ import org.wso2.identity.integration.test.rest.api.server.application.management
 import org.wso2.identity.integration.test.rest.api.server.application.management.v1.model.ApplicationModel;
 import org.wso2.identity.integration.test.rest.api.server.application.management.v1.model.ApplicationResponseModel;
 import org.wso2.identity.integration.test.rest.api.server.application.management.v1.model.ApplicationSharePOSTRequest;
+import org.wso2.identity.integration.test.rest.api.server.application.management.v1.model.Authenticator;
 import org.wso2.identity.integration.test.rest.api.server.application.management.v1.model.InboundProtocols;
 import org.wso2.identity.integration.test.rest.api.server.application.management.v1.model.OpenIDConnectConfiguration;
 import org.wso2.identity.integration.test.rest.api.user.common.model.Email;
@@ -64,6 +65,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertTrue;
@@ -86,8 +88,8 @@ public class EnhancedB2BLoginTestCase extends OAuth2ServiceAbstractIntegrationTe
 
     private static final String APP_NAME = "EnhancedOrgAuthenticationApp";
     private static final String MGT_APP_AUTHORIZED_API_RESOURCES = "management-app-authorized-apis.json";
-    private static final String ORG_END_USER_USERNAME = "testuser";
-    private static final String ORG_END_USER_PASSWORD = "Testuser@wso2";
+    private static final String ORG_END_USER_USERNAME = "testUser";
+    private static final String ORG_END_USER_PASSWORD = "TestUser@wso2";
     private static final String ORG_END_USER_EMAIL = "testuser@wso2.com";
 
     private final TestUserMode userMode;
@@ -113,8 +115,8 @@ public class EnhancedB2BLoginTestCase extends OAuth2ServiceAbstractIntegrationTe
     public static Object[][] configProvider() {
 
         return new Object[][]{
-                {TestUserMode.SUPER_TENANT_ADMIN, "enhancedstborg", "enhancedstborg"},
-                {TestUserMode.TENANT_ADMIN, "enhancedb2borg2", "enhancedb2borg2"}};
+                {TestUserMode.SUPER_TENANT_ADMIN, "eoa_sub_org", "eoa_sub_org"},
+                {TestUserMode.TENANT_ADMIN, "eoa_t_sub_org", "eoa_t_sub_org"}};
     }
 
     @Factory(dataProvider = "configProvider")
@@ -136,8 +138,6 @@ public class EnhancedB2BLoginTestCase extends OAuth2ServiceAbstractIntegrationTe
         oAuth2RestClient = new OAuth2RestClient(serverURL, tenantInfo);
         orgMgtRestClient = new OrgMgtRestClient(isServer, tenantInfo, serverURL,
                 new org.json.JSONObject(RESTTestBase.readResource(MGT_APP_AUTHORIZED_API_RESOURCES, this.getClass())));
-
-
     }
 
     @Test(priority = 2, dependsOnMethods = "testInit")
@@ -189,6 +189,27 @@ public class EnhancedB2BLoginTestCase extends OAuth2ServiceAbstractIntegrationTe
     }
 
     @Test(priority = 5, dependsOnMethods = "testShareApplicationToSubOrg")
+    public void testVerifyEnhancedFlagReflectedInAppResponse() throws Exception {
+
+        ApplicationResponseModel appResponse = oAuth2RestClient.getApplication(rootApplicationId);
+        assertNotNull(appResponse, "Application response should not be null.");
+        assertNotNull(appResponse.getEnhancedOrgAuthenticationEnabled(),
+                "enhancedOrgAuthenticationEnabled should not be null in the application response.");
+        assertTrue(appResponse.getEnhancedOrgAuthenticationEnabled(),
+                "enhancedOrgAuthenticationEnabled should be true for the created application.");
+
+        List<Authenticator> authenticators = appResponse.getAuthenticationSequence().getSteps().stream()
+                .flatMap(step -> step.getOptions().stream())
+                .toList();
+        assertTrue(authenticators.stream()
+                        .anyMatch(a -> "OrganizationIdentifierHandler".equals(a.getAuthenticator())),
+                "OrganizationIdentifierHandler should be present in authentication steps.");
+        Assert.assertFalse(authenticators.stream()
+                        .anyMatch(a -> "SSO".equals(a.getIdp())),
+                "SSO IDP should not be present in authentication steps.");
+    }
+
+    @Test(priority = 6, dependsOnMethods = "testVerifyEnhancedFlagReflectedInAppResponse")
     public void testCreateSubOrgUser() throws Exception {
 
         switchedM2MToken = orgMgtRestClient.switchM2MToken(organizationId);
@@ -203,7 +224,7 @@ public class EnhancedB2BLoginTestCase extends OAuth2ServiceAbstractIntegrationTe
         assertNotNull(orgUserId, "Sub-org user ID should not be null.");
     }
 
-    @Test(priority = 6, dependsOnMethods = "testCreateSubOrgUser")
+    @Test(priority = 7, dependsOnMethods = "testCreateSubOrgUser")
     public void testSendAuthorizeRequest() throws Exception {
 
         List<NameValuePair> params = new ArrayList<>();
@@ -230,7 +251,7 @@ public class EnhancedB2BLoginTestCase extends OAuth2ServiceAbstractIntegrationTe
         EntityUtils.consume(response.getEntity());
     }
 
-    @Test(priority = 7, dependsOnMethods = "testSendAuthorizeRequest")
+    @Test(priority = 8, dependsOnMethods = "testSendAuthorizeRequest")
     public void testSendLoginPost() throws Exception {
 
         List<NameValuePair> urlParameters = new ArrayList<>();
@@ -259,7 +280,7 @@ public class EnhancedB2BLoginTestCase extends OAuth2ServiceAbstractIntegrationTe
         assertNotNull(authorizationCode, "Authorization code should not be null.");
     }
 
-    @Test(priority = 8, dependsOnMethods = "testSendLoginPost")
+    @Test(priority = 9, dependsOnMethods = "testSendLoginPost")
     public void testGetAccessToken() throws Exception {
 
         List<NameValuePair> params = new ArrayList<>();
@@ -285,7 +306,7 @@ public class EnhancedB2BLoginTestCase extends OAuth2ServiceAbstractIntegrationTe
         assertNotNull(accessToken, "Access token should not be null.");
     }
 
-    @Test(priority = 9, dependsOnMethods = "testGetAccessToken")
+    @Test(priority = 10, dependsOnMethods = "testGetAccessToken")
     public void testIntrospectAccessToken() throws Exception {
 
         String introspectUrl = OAuth2Constant.INTRO_SPEC_ENDPOINT.replaceFirst(
@@ -305,7 +326,7 @@ public class EnhancedB2BLoginTestCase extends OAuth2ServiceAbstractIntegrationTe
                 "Neither org_id nor org_name claim is present in the introspection response.");
     }
 
-    @Test(priority = 10, dependsOnMethods = "testIntrospectAccessToken")
+    @Test(priority = 11, dependsOnMethods = "testIntrospectAccessToken")
     public void testLoginWithInvalidPassword() throws Exception {
 
         try (CloseableHttpClient freshClient = createHttpClient()) {
@@ -354,17 +375,6 @@ public class EnhancedB2BLoginTestCase extends OAuth2ServiceAbstractIntegrationTe
             Assert.assertFalse(location.contains("code="),
                     "Authorization code should NOT be present when wrong password is used.");
         }
-    }
-
-    @Test(priority = 11, dependsOnMethods = "testCreateEnhancedOrgAuthenticationApplication")
-    public void testVerifyEnhancedFlagReflectedInAppResponse() throws Exception {
-
-        ApplicationResponseModel appResponse = oAuth2RestClient.getApplication(rootApplicationId);
-        assertNotNull(appResponse, "Application response should not be null.");
-        assertNotNull(appResponse.getEnhancedOrgAuthenticationEnabled(),
-                "enhancedOrgAuthenticationEnabled should not be null in the application response.");
-        assertTrue(appResponse.getEnhancedOrgAuthenticationEnabled(),
-                "enhancedOrgAuthenticationEnabled should be true for the created application.");
     }
 
     @AfterClass(alwaysRun = true)
