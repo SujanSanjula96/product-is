@@ -138,20 +138,7 @@ public class EnhancedB2BLoginTestCase extends OAuth2ServiceAbstractIntegrationTe
 
         super.init(userMode);
 
-        Lookup<CookieSpecProvider> cookieSpecRegistry = RegistryBuilder.<CookieSpecProvider>create()
-                .register(CookieSpecs.DEFAULT, new RFC6265CookieSpecProvider())
-                .build();
-        client = HttpClientBuilder.create()
-                .setDefaultCookieStore(new BasicCookieStore())
-                .setDefaultRequestConfig(RequestConfig.custom().setCookieSpec(CookieSpecs.DEFAULT).build())
-                .setDefaultCookieSpecRegistry(cookieSpecRegistry)
-                .setRedirectStrategy(new DefaultRedirectStrategy() {
-                    @Override
-                    protected boolean isRedirectable(String method) {
-                        return false;
-                    }
-                })
-                .build();
+        client = createHttpClient();
 
         scim2RestClient = new SCIM2RestClient(serverURL, tenantInfo);
         oAuth2RestClient = new OAuth2RestClient(serverURL, tenantInfo);
@@ -345,70 +332,54 @@ public class EnhancedB2BLoginTestCase extends OAuth2ServiceAbstractIntegrationTe
     public void testLoginWithInvalidPassword() throws Exception {
 
         // Use a fresh client without session cookies so the authorize request always shows the login page.
-        Lookup<CookieSpecProvider> cookieSpecRegistry = RegistryBuilder.<CookieSpecProvider>create()
-                .register(CookieSpecs.DEFAULT, new RFC6265CookieSpecProvider())
-                .build();
-        CloseableHttpClient freshClient = HttpClientBuilder.create()
-                .setDefaultCookieStore(new BasicCookieStore())
-                .setDefaultRequestConfig(RequestConfig.custom().setCookieSpec(CookieSpecs.DEFAULT).build())
-                .setDefaultCookieSpecRegistry(cookieSpecRegistry)
-                .setRedirectStrategy(new DefaultRedirectStrategy() {
-                    @Override
-                    protected boolean isRedirectable(String method) {
-                        return false;
-                    }
-                })
-                .build();
+        try (CloseableHttpClient freshClient = createHttpClient()) {
 
-        try {
-        // Get a fresh session data key via a new authorize request.
-        List<NameValuePair> params = new ArrayList<>();
-        params.add(new BasicNameValuePair("response_type", "code"));
-        params.add(new BasicNameValuePair("client_id", clientId));
-        params.add(new BasicNameValuePair("redirect_uri", CALLBACK_URL));
-        params.add(new BasicNameValuePair("scope", "openid"));
+            // Get a fresh session data key via a new authorize request.
+            List<NameValuePair> params = new ArrayList<>();
+            params.add(new BasicNameValuePair("response_type", "code"));
+            params.add(new BasicNameValuePair("client_id", clientId));
+            params.add(new BasicNameValuePair("redirect_uri", CALLBACK_URL));
+            params.add(new BasicNameValuePair("scope", "openid"));
 
-        HttpResponse authorizeResponse = sendPostRequestWithParameters(freshClient, params,
-                getOPathURL(AUTHORIZE_ENDPOINT_URL));
-        Header locationHeader = authorizeResponse.getFirstHeader(HTTP_RESPONSE_HEADER_LOCATION);
-        assertNotNull(locationHeader, "Location header for invalid-password authorize request is not available.");
-        EntityUtils.consume(authorizeResponse.getEntity());
+            HttpResponse authorizeResponse = sendPostRequestWithParameters(freshClient, params,
+                    getOPathURL(AUTHORIZE_ENDPOINT_URL));
+            Header locationHeader = authorizeResponse.getFirstHeader(HTTP_RESPONSE_HEADER_LOCATION);
+            assertNotNull(locationHeader, "Location header for invalid-password authorize request is not available.");
+            EntityUtils.consume(authorizeResponse.getEntity());
 
-        HttpResponse loginPageResponse = sendGetRequest(freshClient, locationHeader.getValue());
-        Map<String, Integer> keyPositionMap = new HashMap<>(1);
-        keyPositionMap.put("name=\"sessionDataKey\"", 1);
-        List<DataExtractUtil.KeyValue> keyValues =
-                DataExtractUtil.extractDataFromResponse(loginPageResponse, keyPositionMap);
-        assertNotNull(keyValues, "sessionDataKey not found for negative test.");
-        EntityUtils.consume(loginPageResponse.getEntity());
+            HttpResponse loginPageResponse = sendGetRequest(freshClient, locationHeader.getValue());
+            Map<String, Integer> keyPositionMap = new HashMap<>(1);
+            keyPositionMap.put("name=\"sessionDataKey\"", 1);
+            List<DataExtractUtil.KeyValue> keyValues =
+                    DataExtractUtil.extractDataFromResponse(loginPageResponse, keyPositionMap);
+            assertNotNull(keyValues, "sessionDataKey not found for negative test.");
+            EntityUtils.consume(loginPageResponse.getEntity());
 
-        String freshSessionDataKey = keyValues.get(0).getValue();
-        assertNotNull(freshSessionDataKey, "Fresh session data key should not be null.");
+            String freshSessionDataKey = keyValues.get(0).getValue();
+            assertNotNull(freshSessionDataKey, "Fresh session data key should not be null.");
 
-        // Attempt login with a wrong password.
-        List<NameValuePair> urlParameters = new ArrayList<>();
-        urlParameters.add(new BasicNameValuePair("username", ORG_END_USER_USERNAME));
-        urlParameters.add(new BasicNameValuePair("password", "WrongPassword@123"));
-        urlParameters.add(new BasicNameValuePair("sessionDataKey", freshSessionDataKey));
+            // Attempt login with a wrong password.
+            List<NameValuePair> urlParameters = new ArrayList<>();
+            urlParameters.add(new BasicNameValuePair("username", ORG_END_USER_USERNAME));
+            urlParameters.add(new BasicNameValuePair("password", "WrongPassword@123"));
+            urlParameters.add(new BasicNameValuePair("sessionDataKey", freshSessionDataKey));
 
-        HttpResponse loginResponse = sendPostRequestWithParameters(freshClient, urlParameters,
-                getOPathURL(COMMON_AUTH_URL));
-        Header loginLocationHeader = loginResponse.getFirstHeader(HTTP_RESPONSE_HEADER_LOCATION);
-        EntityUtils.consume(loginResponse.getEntity());
+            HttpResponse loginResponse = sendPostRequestWithParameters(freshClient, urlParameters,
+                    getOPathURL(COMMON_AUTH_URL));
+            Header loginLocationHeader = loginResponse.getFirstHeader(HTTP_RESPONSE_HEADER_LOCATION);
+            EntityUtils.consume(loginResponse.getEntity());
 
-        // Follow the redirect chain and assert no auth code is issued.
-        String location = loginLocationHeader != null ? loginLocationHeader.getValue() : "";
-        for (int i = 0; i < 5 && loginLocationHeader != null && !location.contains("code="); i++) {
-            HttpResponse followResponse = sendGetRequest(freshClient, location);
-            Header nextLocation = followResponse.getFirstHeader(HTTP_RESPONSE_HEADER_LOCATION);
-            EntityUtils.consume(followResponse.getEntity());
-            if (nextLocation == null) break;
-            location = nextLocation.getValue();
-        }
-        Assert.assertFalse(location.contains("code="),
-                "Authorization code should NOT be present when wrong password is used.");
-        } finally {
-            freshClient.close();
+            // Follow the redirect chain and assert no auth code is issued.
+            String location = loginLocationHeader != null ? loginLocationHeader.getValue() : "";
+            for (int i = 0; i < 5 && loginLocationHeader != null && !location.contains("code="); i++) {
+                HttpResponse followResponse = sendGetRequest(freshClient, location);
+                Header nextLocation = followResponse.getFirstHeader(HTTP_RESPONSE_HEADER_LOCATION);
+                EntityUtils.consume(followResponse.getEntity());
+                if (nextLocation == null) break;
+                location = nextLocation.getValue();
+            }
+            Assert.assertFalse(location.contains("code="),
+                    "Authorization code should NOT be present when wrong password is used.");
         }
     }
 
@@ -456,6 +427,27 @@ public class EnhancedB2BLoginTestCase extends OAuth2ServiceAbstractIntegrationTe
     // =========================================================================
     // Helpers
     // =========================================================================
+
+    /**
+     * Creates an HTTP client with RFC6265 cookie handling and manual redirect control.
+     */
+    private CloseableHttpClient createHttpClient() {
+
+        Lookup<CookieSpecProvider> cookieSpecRegistry = RegistryBuilder.<CookieSpecProvider>create()
+                .register(CookieSpecs.DEFAULT, new RFC6265CookieSpecProvider())
+                .build();
+        return HttpClientBuilder.create()
+                .setDefaultCookieStore(new BasicCookieStore())
+                .setDefaultRequestConfig(RequestConfig.custom().setCookieSpec(CookieSpecs.DEFAULT).build())
+                .setDefaultCookieSpecRegistry(cookieSpecRegistry)
+                .setRedirectStrategy(new DefaultRedirectStrategy() {
+                    @Override
+                    protected boolean isRedirectable(String method) {
+                        return false;
+                    }
+                })
+                .build();
+    }
 
     /**
      * Builds the o-path URL for the given endpoint constant by inserting
